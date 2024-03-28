@@ -34,7 +34,7 @@ export const getGreeting = () => {
 }
 
 
-export const getDate = (formatOprions={
+export const getDate = (epoch: number | string, formatOprions={
     year: "numeric",
     month: "long",
     day: "2-digit",
@@ -42,5 +42,5 @@ export const getDate = (formatOprions={
   } as const) => {
   const intl = useIntl();
 
-  return intl.formatDate(new Date(), formatOprions);
+  return intl.formatDate(new Date(epoch), formatOprions);
 }

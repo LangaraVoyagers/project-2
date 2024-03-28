@@ -1,16 +1,39 @@
 import { ApexOptions } from "apexcharts";
 import DashBoardLayout from 'components/dashboard';
 import { Fragment } from 'react/jsx-runtime';
+import { getSeasons } from "api/seasons";
+import { useAlert } from "context/AlertProvider";
+import { useIntl } from "react-intl";
+import { useQuery } from "react-query";
+import useQueryCache from "hooks/useQueryCache";
+import { useState } from "react";
 
 const Home = () => {
-	const seasonOptions = [
-    { label: "Season1", value: "Season1" },
-    { label: "Season2", value: "Season2" },
-    { label: "Season3", value: "Season3" },
-    { label: "Season4", value: "Season4" },
-    { label: "Season5", value: "Season5" },
-    { label: "Season6", value: "Season6" },
-  ];
+  const intl = useIntl();
+  const { showAlert } = useAlert();
+  const [seasonsOptions, setSeasonsOptions] = useState<Array<any>>([]);
+
+  const { GET_QUERY_KEY } = useQueryCache("seasons");
+
+
+  const { isLoading: isSeasonsOptionsLoading } = useQuery({
+    queryKey: GET_QUERY_KEY,
+    queryFn: () => getSeasons(),
+    onSuccess: (results) => {
+      setSeasonsOptions(results.map(e => { return { label: e.name, value: e._id } }));
+      console.log(results)
+    },
+    onError: (error) => {
+      console.log(error);
+      showAlert(
+        intl.formatMessage({
+          id: "seasons.get.seasons.error",
+          defaultMessage: "No seasons found",
+        }),
+        "error"
+      );
+    },
+  });
 
   const graphSeries = [{
     name: 'Month',
@@ -47,11 +70,12 @@ const Home = () => {
     },
 		colors: ["#15A260"]
   }
-	
+
 	return (
 		<Fragment>
-			<DashBoardLayout 
-				seasonOptions={seasonOptions} 
+			<DashBoardLayout
+        isSeasonsOptionsLoading={isSeasonsOptionsLoading}
+				seasonsOptions={seasonsOptions} 
 				graphSeries={graphSeries} 
 				graphOptions={graphOptions} />
 		</Fragment>

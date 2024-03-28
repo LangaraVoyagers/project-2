@@ -1,9 +1,7 @@
 import {
   ArrowRight,
   ArrowUp,
-  FilePlus,
-  HandCoins,
-  Plant
+  FilePlus
 } from "@phosphor-icons/react";
 import {
   Box,
@@ -11,24 +9,28 @@ import {
   Button,
   Grid,
   Typography,
+  useTheme,
 } from "@mui/material";
-import { Fragment, ReactNode } from "react";
+import { FormattedDate, FormattedMessage } from "react-intl";
+import { Fragment, ReactNode, useEffect, useState } from "react";
 import Select, { StylesConfig } from "react-select";
 import { getDate, getGreeting } from "shared/date-helpers";
 
 import { ApexOptions } from "apexcharts";
-import { FormattedMessage } from "react-intl";
 import SplineGraph from "./SplineGraph";
+import { getIndicators } from "api/dashbaoard";
+import { useAlert } from "context/AlertProvider";
+import { useIntl } from "react-intl";
+import { useQuery } from "react-query";
+import { useThemMode } from "context/ThemeProvider";
 import { useUser } from "context/UserProvider";
 
 const gridGap = "1.5rem";
-
-const bgHighlight = "#F5F5F4";
 const borderRadius = "0.5rem";
 const seperator = { xl: "2px solid #D7D3D0" };
 
 const cardProps = {
-  backgroundColor: "white",
+  backgroundColor: "background.paper",
   borderRadius,
   padding: "1.5rem"
 }
@@ -51,9 +53,97 @@ const reactSelectStyles: StylesConfig = {
 };
 
 const DashBoardLayout = (props: any) => {
+  const { mode } = useThemMode();
   const { user } = useUser();
+  const intl = useIntl();
   const USER_GREETING = getGreeting();
-  const FORMATTED_DATE = getDate();
+  const FORMATTED_DATE = getDate(new Date().getTime());
+  const { showAlert } = useAlert();
+  const [cardInfo, setCardInfo] = useState<any>([]);
+  const [seasonSelected, setSeasonSelected] = useState<any>();
+
+  const { isSeasonsOptionsLoading, seasonsOptions, graphSeries, graphOptions } = props;
+
+  useEffect(() => {
+    if (seasonsOptions.length)
+      setSeasonSelected(seasonsOptions.at(-1));
+  }, [seasonsOptions]);
+
+  // TODO: Loading state
+  useQuery({
+    queryKey: seasonSelected?.value,
+    queryFn: () => getIndicators(seasonSelected?.value),
+    enabled: !!seasonSelected?.value,
+    onSuccess: (results) => {
+      console.log(results);
+      const { season, totals, averages, payrollToTodayData } = results
+      const { product } = season;
+      const currencyName = season?.currency?.name;
+      const unitName = season?.unit.name;
+      
+      setCardInfo({
+        harvestInfo : [
+          {
+            label: <FormattedMessage defaultMessage="PRODUCT" id="dashboard.labels.product" />,
+            content: product?.name
+          },
+          {
+            label: <FormattedMessage defaultMessage="START DATE" id="dashboard.labels.startDate" />,
+            content: <FormattedDate 
+              value={new Date(season?.startDate)} 
+              year="numeric"
+              month="short"
+              day="2-digit" />
+          },
+          {
+            label: <FormattedMessage defaultMessage="PRICE PER UNIT" id="dashboard.labels.pricePerUnit" />,
+            content: `${ currencyName } ${ Number(season?.price).toFixed(2) }`
+          },
+          {
+            label: <FormattedMessage defaultMessage="HARVEST DAYS" id="dashboard.labels.harvestDays" />,
+            content: totals?.harvestDays
+          },
+          {
+            label: <FormattedMessage defaultMessage="TOTAL HARVEST AMOUNT" id="dashboard.labels.totalHarvestAmount" />,
+            content: `${ Number(totals?.totalHarvest).toFixed(2) } ${ unitName }`
+          }
+        ],
+      midSectionInfo: [
+        {
+          label: <FormattedMessage defaultMessage="SEASON'S TOTAL PAYROLL" id="dashboard.labels.seasonsTotalPayroll" />,
+          content: `${ currencyName } ${ Number(totals?.totalPayroll).toFixed(2) }`,
+          perIncrease: `${ averages?.avePayrollChange ?? 0 } %`
+        },
+        {
+          label: <FormattedMessage defaultMessage="TODAY'S COLLECTION" id="dashboard.labels.todaysCollection" />,
+          content: `${ Number(totals?.todaysHarvest).toFixed(2) } ${ unitName }`,
+          perIncrease: `${ averages?.aveHarvestChange ?? 0 } %`
+        }
+      ],
+      payrollInfo: {
+        payrollToToday: {
+          label: "PAYROLL TO THIS DAY",
+          content: `${ currencyName } ${ Number(payrollToTodayData?.grossAmount).toFixed(2) }`,
+          startDate: <FormattedDate 
+            value={new Date(payrollToTodayData?.startDate)} 
+            month="short" 
+            day="2-digit" />,
+          daysLeft: payrollToTodayData?.daysRemaining
+        }
+      }
+    })
+    },
+    onError: (error) => {
+      console.log(error);
+      showAlert(
+        intl.formatMessage({
+          id: "dashboard.get.indicators.error",
+          defaultMessage: "Some error occurred, Please try again later",
+        }),
+        "error"
+      );
+    },
+  });
   
   return (
     <Box padding={{md: "2rem"}}>
@@ -70,7 +160,7 @@ const DashBoardLayout = (props: any) => {
             &ensp;
             <Typography
               px="5px"
-              bgcolor="white"
+              bgcolor="background.paper"
               display="inline-block" 
               border="1px solid #D7D3D0"
               borderRadius="4px">
@@ -84,11 +174,25 @@ const DashBoardLayout = (props: any) => {
           </Button>
         </Grid>
       </Grid>
-      <HarvestInfo seasonOptions={props?.seasonOptions} />
-      <MidSectionInfo series={props?.graphSeries} options={props?.graphOptions} />
-      <PayrollInfo />
+      <HarvestInfo
+        mode={mode}
+        cardInfo={cardInfo?.harvestInfo}
+        seasonSelected={seasonSelected}
+        setSeasonSelected={setSeasonSelected}
+        seasonsOptions={seasonsOptions}  
+        isLoading={isSeasonsOptionsLoading}  />
+      <MidSectionInfo
+        cardInfo={cardInfo?.midSectionInfo} 
+        series={graphSeries} 
+        options={graphOptions} />
+      <PayrollInfo cardInfo={cardInfo?.payrollInfo} />
     </Box>
   )
+}
+
+export interface ISeasonOptions {
+  label: string;
+  value: string;
 }
 
 interface ICardLayout {
@@ -120,17 +224,30 @@ const CardLayout = (props: ICardLayout) => {
 }
 
 const HarvestInfo = (props: any) => {
+  const { 
+    mode,
+    cardInfo,
+    seasonSelected,
+    setSeasonSelected,
+    seasonsOptions, 
+    isSeasonsOptionsLoading } = props;
+
   return (
     <Grid {...cardProps} xs={12}>
       <Box mb="1.5rem">
-        <Select 
-          options={props?.seasonOptions} 
+        <Select
+          placeholder={<FormattedMessage id="dashboard.seasonMenuPlaceHolder" defaultMessage="Select Season" />}
+          options={seasonsOptions} 
+          isLoading={isSeasonsOptionsLoading}
           styles={reactSelectStyles}
+          value={seasonSelected}
+          onChange={(e) => setSeasonSelected(e)}
           theme={(theme) => ({
             ...theme,
             colors: {
             ...theme.colors,
               text: "white",
+              neutral0: mode === "light" ? "white" : "black",
               primary50: "#15A260",
               primary25: "#C5E8D7",
               primary: "#055E40",
@@ -138,53 +255,26 @@ const HarvestInfo = (props: any) => {
           })} />
       </Box>
       <Grid container rowSpacing={{ xs: "2rem" }} columnSpacing={{ lg: "2rem" }}>
-        <Grid item xs={12} md={6} lg={3} xl={2.25}>
-          <CardLayout 
-            label="PRODUCT" 
-            content="Coffee" 
-            boxProps={{
-              borderRight: seperator
-            }} />
-        </Grid>
-
-        <Grid item xs={12} md={6} lg={3} xl={2.25}>
-          <CardLayout 
-            label="START DATE" 
-            content="01 Jan, 2024" 
-            boxProps={{
-              borderRight: seperator
-            }} />
-        </Grid>
-
-        <Grid item xs={12} md={6} lg={3} xl={2.25}>
-          <CardLayout 
-            label="PRICE PER UNIT" 
-            content="$ 3" 
-            boxProps={{
-              borderRight: seperator
-            }} />
-        </Grid>
-
-        <Grid item xs={12} md={6} lg={3} xl={2.25}>
-          <CardLayout 
-            label="HARVEST DAYS" 
-            content="34"
-            boxProps={{
-              borderRight: seperator
-            }} />
-        </Grid>
-
-        <Grid item xs={12} md={6} lg={3} xl={2.25}>
-          <CardLayout 
-            label="TOTAL HARVEST AMOUNT" 
-            content="1,463 kg" />
-        </Grid>
+        {
+          cardInfo?.map((item: any, idx: number) => {
+            return (
+              <Grid key={idx} item xs={12} md={6} lg={3} xl={2.25}>
+                <CardLayout 
+                  label={item.label} 
+                  content={item.content} 
+                  boxProps={idx === (cardInfo.length - 1) ? {} : {
+                    borderRight: seperator
+                  }} />
+              </Grid>
+            )
+          })
+        }
       </Grid>
     </Grid>
   )
 }
 
-const MidSectionInfo = (props: IApexChartProps) => {
+const MidSectionInfo = (props: any) => {
   return (    
     <Grid container pt={gridGap} columnSpacing={gridGap} rowSpacing={{md: gridGap}} alignItems="stretch">
       <Grid item xs={12} md={12} xl={9}>
@@ -194,45 +284,38 @@ const MidSectionInfo = (props: IApexChartProps) => {
       </Grid>
       <Grid item xs={12} md={12} xl={3} height="100%">
           <Grid container height="100%" spacing={gridGap} alignItems="stretch">
-            <Grid item xs={12} md={6} lg={6} xl={12}>
-              <CardLayout 
-                label="TOTAL HARVEST AMOUNT"
-                content={
-                  <Fragment>
-                    <span>$ 16,382</span>
-                    <Typography mt="1rem" color="#79716B" display="flex" alignItems="center">
-                      <Typography color="#15A260" fontSize="0.875rem" fontWeight={600} variant="caption">
-                        <ArrowUp /> 15%
+
+            {
+              props?.cardInfo?.map((item: any, idx: number)=> {
+               return (
+               <Grid key={idx} item xs={12} md={6} lg={6} xl={12}>
+                <CardLayout 
+                  label={ item?.label }
+                  content={
+                    <Fragment>
+                      <span>{ item?.content }</span>
+                      <Typography mt="1rem" color="#79716B" display="flex" alignItems="center">
+                        <Typography color="#15A260" fontSize="0.875rem" fontWeight={600} variant="caption">
+                          <ArrowUp /> { item?.perIncrease }
+                        </Typography>
+                        &nbsp; average
                       </Typography>
-                      &nbsp; average
-                    </Typography>
-                  </Fragment>
-                } 
-                boxProps={cardProps} />
-            </Grid>
-            <Grid item xs={12} md={6} lg={6} xl={12}>
-              <CardLayout 
-                label="TOTAL HARVEST AMOUNT" 
-                content={
-                  <Fragment>
-                    <span>$ 16,382</span>
-                    <Typography mt="1rem" color="#79716B" display="flex" alignItems="center">
-                      <Typography color="#15A260" fontSize="0.875rem" fontWeight={600} variant="caption">
-                        <ArrowUp /> 15%
-                      </Typography>
-                      &nbsp; average
-                    </Typography>
-                  </Fragment>
-                } 
-                boxProps={cardProps} />
-            </Grid>
+                    </Fragment>
+                  } 
+                  boxProps={cardProps} />
+              </Grid>)
+              })
+            }
           </Grid>
       </Grid>
     </Grid>
   )
 }
 
-const PayrollInfo = () => {
+const PayrollInfo = (props: any) => {
+  const theme = useTheme();
+  const {cardInfo} = props;
+  const {payrollToToday} = cardInfo || {};
   return (
     <Grid container mt="2.25rem" spacing={gridGap}>
       <Grid item xs={12} lg={3}>
@@ -240,25 +323,25 @@ const PayrollInfo = () => {
           <Typography
             color="#79716B"
             fontSize="1.14rem"
-            fontWeight={600}>PAYROLL TO THIS DAY</Typography>
+            fontWeight={600}>PAYROLL TO THIS DATE</Typography>
           <Box
             p="0.5rem"
             mt="1.3rem"
-            bgcolor="#F5F5F4"
+            bgcolor={theme.palette.grey[100]}
             padding="0.5rem"
             borderRadius={borderRadius}>
             <Typography
               m="0"
               fontWeight={600} 
               fontSize="1.5rem">
-              $ 1,472
+              { payrollToToday?.content }
             </Typography>
           </Box>
           <Box display="flex" mt="1.0625rem" alignItems="center" justifyContent="space-between">
             <Typography
               color="#1C1917"
               fontSize="0.875rem"
-              fontWeight={500}>Starting: Feb 15</Typography>
+              fontWeight={500}>Starting: Mar 16</Typography>
             <Box 
               display="inline-flex"
               padding="1px 9px"
@@ -273,7 +356,7 @@ const PayrollInfo = () => {
                 fontSize="0.75rem"
                 fontWeight={500}>
                 <Box mr="8px" display="inline-block" width="0.5rem" height="0.5rem" borderRadius="100%" bgcolor="#17B26A" />
-                3 days left
+                { payrollToToday?.daysLeft } days left
               </Typography>
             </Box>
           </Box>
@@ -289,14 +372,15 @@ const PayrollInfo = () => {
           </button>
         </Box>
       </Grid>
-      <Grid item xs={12} lg={9}>
+
+      {/* <Grid item xs={12} lg={9}>
         <Box {...cardProps}>
           <Typography fontSize="1rem" fontWeight={500}>
             Recent Payrolls
           </Typography>
           <Grid container rowSpacing={gridGap} columnSpacing={gridGap}>
             <Grid item xs={12} md={6} lg={4}>
-              <Box px="1rem" py="1.5rem" bgcolor={bgHighlight} borderRadius={borderRadius}>
+              <Box px="1rem" py="1.5rem" bgcolor={theme.palette.grey[100]} borderRadius={borderRadius}>
                 <Typography fontSize="0.875rem" fontWeight={500}>
                   Feb 01 - Feb 15
                 </Typography>
@@ -305,7 +389,7 @@ const PayrollInfo = () => {
                     <Box
                       display="flex"
                       alignItems="center"
-                      bgcolor="white"
+                      bgcolor="background.paper"
                       padding="0.5rem"
                       borderRadius={borderRadius}>
                       <HandCoins size="1rem" />
@@ -316,7 +400,7 @@ const PayrollInfo = () => {
                     <Box
                       display="flex"
                       alignItems="center"
-                      bgcolor="white"
+                      bgcolor="background.paper"
                       padding="0.5rem"
                       borderRadius={borderRadius}>
                       <Plant size="1rem" />
@@ -391,7 +475,8 @@ const PayrollInfo = () => {
             </Grid>
           </Grid>
         </Box>
-      </Grid>
+      </Grid> */}
+
     </Grid>
   )
 }
